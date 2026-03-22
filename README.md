@@ -27,7 +27,7 @@ Most AI agents have amnesia. They forget everything the moment you start a new c
 | 🧠 **Smart Extraction** | LLM-powered 6-category memory extraction — no manual `memory_store` needed |
 | ⏳ **Memory Lifecycle** | Weibull decay + 3-tier promotion — important memories surface, stale ones fade |
 | 🔒 **Multi-Scope Isolation** | Per-agent, per-user, per-project memory boundaries |
-| 🔌 **Any Embedding Provider** | OpenAI, Jina, Gemini, Ollama, or any OpenAI-compatible API |
+| 🔌 **Any Embedding Provider** | OpenAI, Jina, Cohere, Gemini, Ollama, Azure AI Services, or any OpenAI-compatible API |
 | 🛠️ **Full Operations Toolkit** | CLI, backup, migration, upgrade, export/import — not a toy |
 
 ---
@@ -290,7 +290,7 @@ Query → BM25 FTS ─────┘
 
 ### Cross-Encoder Reranking
 
-- Supports **Jina**, **SiliconFlow**, **Voyage AI**, **Pinecone**, or any compatible endpoint
+- Supports **Jina**, **Cohere**, **SiliconFlow**, **Voyage AI**, **Pinecone**, or any compatible endpoint
 - Hybrid scoring: 60% cross-encoder + 40% original fused score
 - Graceful degradation: falls back to cosine similarity on API failure
 
@@ -429,6 +429,7 @@ This plugin works with **any OpenAI-compatible embedding API**:
 | **Jina** (recommended) | `jina-embeddings-v5-text-small` | `https://api.jina.ai/v1` | 1024 |
 | **OpenAI** | `text-embedding-3-small` | `https://api.openai.com/v1` | 1536 |
 | **Google Gemini** | `gemini-embedding-001` | `https://generativelanguage.googleapis.com/v1beta/openai/` | 3072 |
+| **Cohere on Azure AI Services** | `embed-v-4-0` | `https://<resource>.services.ai.azure.com/openai/v1` | 1536 |
 | **Ollama** (local) | `nomic-embed-text` | `http://localhost:11434/v1` | _provider-specific_ |
 
 </details>
@@ -441,6 +442,7 @@ Cross-encoder reranking supports multiple providers via `rerankProvider`:
 | Provider | `rerankProvider` | Endpoint | Example Model |
 | --- | --- | --- | --- |
 | **Jina** (default) | `jina` | `https://api.jina.ai/v1/rerank` | `jina-reranker-v3` |
+| **Cohere on Azure AI Services** | `cohere` | `https://<resource>.services.ai.azure.com/providers/cohere/v2/rerank` | `Cohere-rerank-v4.0-pro` |
 | **SiliconFlow** (free tier available) | `siliconflow` | `https://api.siliconflow.com/v1/rerank` | `BAAI/bge-reranker-v2-m3` |
 | **Voyage AI** | `voyage` | `https://api.voyageai.com/v1/rerank` | `rerank-2.5` |
 | **Pinecone** | `pinecone` | `https://api.pinecone.io/rerank` | `bge-reranker-v2-m3` |
@@ -496,8 +498,40 @@ Cross-encoder reranking supports multiple providers via `rerankProvider`:
 
 </details>
 
+<details>
+<summary>Cohere on Azure AI Services config example</summary>
+
+Azure AI Services hosts Cohere models with a unified API key. Note: the embed endpoint uses OpenAI-compatible format, while the rerank endpoint uses Cohere's native `/v2/rerank` format with `api-key` header authentication (not Bearer token).
+
+```json
+{
+  "embedding": {
+    "apiKey": "<azure-ai-services-key>",
+    "model": "embed-v-4-0",
+    "baseURL": "https://<resource>.services.ai.azure.com/openai/v1",
+    "dimensions": 1536
+  },
+  "retrieval": {
+    "rerank": "cross-encoder",
+    "rerankProvider": "cohere",
+    "rerankEndpoint": "https://<resource>.services.ai.azure.com/providers/cohere/v2/rerank",
+    "rerankApiKey": "<azure-ai-services-key>",
+    "rerankModel": "Cohere-rerank-v4.0-pro"
+  }
+}
+```
+
+**Important notes:**
+- Azure AI Services uses `api-key` header for authentication, not `Authorization: Bearer`
+- Embedding input must be an array (the plugin normalizes this automatically)
+- Azure deployment names use hyphens (e.g., `embed-v-4-0`), not dots
+- The same API key works for both embedding and reranking
+
+</details>
+
 Notes:
 - `voyage` sends `{ model, query, documents }` without `top_n`. Responses are parsed from `data[].relevance_score`.
+- `cohere` uses `api-key` header authentication and sends `{ model, query, documents, top_n }`. Responses are parsed from `results[].relevance_score`.
 
 </details>
 
