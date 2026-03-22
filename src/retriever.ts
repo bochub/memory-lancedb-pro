@@ -48,7 +48,7 @@ export interface RetrievalConfig {
    *  - "siliconflow": same format as jina (alias, for clarity)
    *  - "voyage": Authorization: Bearer, string[] documents, data[].relevance_score
    *  - "pinecone": Api-Key header, {text}[] documents, data[].score */
-  rerankProvider?: "jina" | "siliconflow" | "voyage" | "pinecone" | "dashscope";
+  rerankProvider?: "jina" | "siliconflow" | "voyage" | "pinecone" | "dashscope" | "cohere";
   /**
    * Length normalization: penalize long entries that dominate via sheer keyword
    * density. Formula: score *= 1 / (1 + log2(charLen / anchor)).
@@ -144,7 +144,7 @@ function clamp01WithFloor(value: number, floor: number): number {
 // Rerank Provider Adapters
 // ============================================================================
 
-type RerankProvider = "jina" | "siliconflow" | "voyage" | "pinecone" | "dashscope";
+type RerankProvider = "jina" | "siliconflow" | "voyage" | "pinecone" | "dashscope" | "cohere";
 
 interface RerankItem {
   index: number;
@@ -204,6 +204,20 @@ function buildRerankRequest(
           documents,
           // Voyage uses top_k (not top_n) to limit reranked outputs.
           top_k: topN,
+        },
+      };
+    case "cohere":
+      // Azure AI Services Cohere: uses api-key header (not Bearer), standard body
+      return {
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": apiKey,
+        },
+        body: {
+          model,
+          query,
+          documents,
+          top_n: topN,
         },
       };
     case "siliconflow":
@@ -278,6 +292,13 @@ function parseRerankResponse(
       return (
         parseItems(data.data, ["relevance_score", "score"]) ??
         parseItems(data.results, ["relevance_score", "score"])
+      );
+    }
+    case "cohere": {
+      // Cohere v2: { results: [{ index, relevance_score }] }
+      return (
+        parseItems(data.results, ["relevance_score", "score"]) ??
+        parseItems(data.data, ["relevance_score", "score"])
       );
     }
     case "siliconflow":

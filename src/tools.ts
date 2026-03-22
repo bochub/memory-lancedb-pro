@@ -698,7 +698,7 @@ export function registerMemoryForgetTool(
 ) {
   api.registerTool(
     (toolCtx) => {
-      const agentId = resolveAgentId((toolCtx as any)?.agentId, context.agentId) ?? "main";
+      const runtimeContext = resolveToolContext(context, toolCtx);
       return {
         name: "memory_forget",
       label: "Memory Forget",
@@ -717,7 +717,7 @@ export function registerMemoryForgetTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId, params) {
         const { query, memoryId, scope } = params as {
           query?: string;
           memoryId?: string;
@@ -725,11 +725,12 @@ export function registerMemoryForgetTool(
         };
 
         try {
-          const agentId = resolveRuntimeAgentId(context.agentId, runtimeCtx);
+          const agentId = runtimeContext.agentId;
           // Determine accessible scopes
-          let scopeFilter = context.scopeManager.getAccessibleScopes(agentId);
+          let scopeFilter = runtimeContext.scopeManager.getAccessibleScopes(agentId);
+          console.log(`[memory-forget] context.agentId=${context.agentId}, runtimeContext.agentId=${runtimeContext.agentId}, scopeFilter=${JSON.stringify(scopeFilter)}`);
           if (scope) {
-            if (context.scopeManager.isAccessible(scope, agentId)) {
+            if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               scopeFilter = [scope];
             } else {
               return {
@@ -745,7 +746,7 @@ export function registerMemoryForgetTool(
           }
 
           if (memoryId) {
-            const deleted = await context.store.delete(memoryId, scopeFilter);
+            const deleted = await runtimeContext.store.delete(memoryId, scopeFilter);
             if (deleted) {
               return {
                 content: [
@@ -767,7 +768,7 @@ export function registerMemoryForgetTool(
           }
 
           if (query) {
-            const results = await retrieveWithRetry(context.retriever, {
+            const results = await retrieveWithRetry(runtimeContext.retriever, {
               query,
               limit: 5,
               scopeFilter,
@@ -783,7 +784,7 @@ export function registerMemoryForgetTool(
             }
 
             if (results.length === 1 && results[0].score > 0.9) {
-              const deleted = await context.store.delete(
+              const deleted = await runtimeContext.store.delete(
                 results[0].entry.id,
                 scopeFilter,
               );
@@ -858,7 +859,7 @@ export function registerMemoryUpdateTool(
 ) {
   api.registerTool(
     (toolCtx) => {
-      const agentId = resolveAgentId((toolCtx as any)?.agentId, context.agentId) ?? "main";
+      const runtimeContext = resolveToolContext(context, toolCtx);
       return {
         name: "memory_update",
       label: "Memory Update",
@@ -879,7 +880,7 @@ export function registerMemoryUpdateTool(
         ),
         category: Type.Optional(stringEnum(MEMORY_CATEGORIES)),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId, params) {
         const { memoryId, text, importance, category } = params as {
           memoryId: string;
           text?: string;
@@ -901,15 +902,15 @@ export function registerMemoryUpdateTool(
           }
 
           // Determine accessible scopes
-          const agentId = resolveRuntimeAgentId(context.agentId, runtimeCtx);
-          const scopeFilter = context.scopeManager.getAccessibleScopes(agentId);
+          const agentId = runtimeContext.agentId;
+          const scopeFilter = runtimeContext.scopeManager.getAccessibleScopes(agentId);
 
           // Resolve memoryId: if it doesn't look like a UUID, try search
           let resolvedId = memoryId;
           const uuidLike = /^[0-9a-f]{8}(-[0-9a-f]{4}){0,4}/i.test(memoryId);
           if (!uuidLike) {
             // Treat as search query
-            const results = await retrieveWithRetry(context.retriever, {
+            const results = await retrieveWithRetry(runtimeContext.retriever, {
               query: memoryId,
               limit: 3,
               scopeFilter,
@@ -963,14 +964,14 @@ export function registerMemoryUpdateTool(
                 details: { action: "noise_filtered" },
               };
             }
-            newVector = await context.embedder.embedPassage(text);
+            newVector = await runtimeContext.embedder.embedPassage(text);
           }
 
           // --- Temporal supersede guard ---
           // For temporal-versioned categories (preferences/entities), changing
           // text must go through supersede to preserve the history chain.
           if (text && newVector) {
-            const existing = await context.store.getById(resolvedId, scopeFilter);
+            const existing = await runtimeContext.store.getById(resolvedId, scopeFilter);
             if (existing) {
               const meta = parseSmartMetadata(existing.metadata, existing);
               if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
@@ -999,7 +1000,7 @@ export function registerMemoryUpdateTool(
                   },
                 );
 
-                const newEntry = await context.store.store({
+                const newEntry = await runtimeContext.store.store({
                   text,
                   vector: newVector,
                   category: category ? (category as any) : existing.category,
@@ -1022,7 +1023,7 @@ export function registerMemoryUpdateTool(
                       targetId: newEntry.id,
                     }),
                   });
-                  await context.store.update(
+                  await runtimeContext.store.update(
                     resolvedId,
                     { metadata: stringifySmartMetadata(invalidatedMeta) },
                     scopeFilter,
@@ -1060,7 +1061,7 @@ export function registerMemoryUpdateTool(
             updates.importance = clamp01(importance, 0.7);
           if (category) updates.category = category;
 
-          const updated = await context.store.update(
+          const updated = await runtimeContext.store.update(
             resolvedId,
             updates,
             scopeFilter,
@@ -1122,7 +1123,7 @@ export function registerMemoryStatsTool(
 ) {
   api.registerTool(
     (toolCtx) => {
-      const agentId = resolveAgentId((toolCtx as any)?.agentId, context.agentId) ?? "main";
+      const runtimeContext = resolveToolContext(context, toolCtx);
       return {
         name: "memory_stats",
       label: "Memory Statistics",
@@ -1134,15 +1135,15 @@ export function registerMemoryStatsTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId, params) {
         const { scope } = params as { scope?: string };
 
         try {
-          const agentId = resolveRuntimeAgentId(context.agentId, runtimeCtx);
+          const agentId = runtimeContext.agentId;
           // Determine accessible scopes
-          let scopeFilter = context.scopeManager.getAccessibleScopes(agentId);
+          let scopeFilter = runtimeContext.scopeManager.getAccessibleScopes(agentId);
           if (scope) {
-            if (context.scopeManager.isAccessible(scope, agentId)) {
+            if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               scopeFilter = [scope];
             } else {
               return {
@@ -1157,9 +1158,9 @@ export function registerMemoryStatsTool(
             }
           }
 
-          const stats = await context.store.stats(scopeFilter);
-          const scopeManagerStats = context.scopeManager.getStats();
-          const retrievalConfig = context.retriever.getConfig();
+          const stats = await runtimeContext.store.stats(scopeFilter);
+          const scopeManagerStats = runtimeContext.scopeManager.getStats();
+          const retrievalConfig = runtimeContext.retriever.getConfig();
 
           const text = [
             `Memory Statistics:`,
@@ -1215,7 +1216,7 @@ export function registerMemoryListTool(
 ) {
   api.registerTool(
     (toolCtx) => {
-      const agentId = resolveAgentId((toolCtx as any)?.agentId, context.agentId) ?? "main";
+      const runtimeContext = resolveToolContext(context, toolCtx);
       return {
         name: "memory_list",
       label: "Memory List",
@@ -1237,7 +1238,7 @@ export function registerMemoryListTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId, params) {
         const {
           limit = 10,
           scope,
@@ -1253,12 +1254,12 @@ export function registerMemoryListTool(
         try {
           const safeLimit = clampInt(limit, 1, 50);
           const safeOffset = clampInt(offset, 0, 1000);
-          const agentId = resolveRuntimeAgentId(context.agentId, runtimeCtx);
+          const agentId = runtimeContext.agentId;
 
           // Determine accessible scopes
-          let scopeFilter = context.scopeManager.getAccessibleScopes(agentId);
+          let scopeFilter = runtimeContext.scopeManager.getAccessibleScopes(agentId);
           if (scope) {
-            if (context.scopeManager.isAccessible(scope, agentId)) {
+            if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
               scopeFilter = [scope];
             } else {
               return {
@@ -1273,7 +1274,7 @@ export function registerMemoryListTool(
             }
           }
 
-          const entries = await context.store.list(
+          const entries = await runtimeContext.store.list(
             scopeFilter,
             category,
             safeLimit,

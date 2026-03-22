@@ -116,6 +116,10 @@ const EMBEDDING_DIMENSIONS: Record<string, number> = {
   // Jina v5
   "jina-embeddings-v5-text-small": 1024,
   "jina-embeddings-v5-text-nano": 768,
+
+  // Cohere (Azure AI deployment names)
+  "embed-v-4-0": 1536,
+  "embed-v4.0": 1536,
 };
 
 // ============================================================================
@@ -446,9 +450,11 @@ export class Embedder {
   }
 
   private buildPayload(input: string | string[], task?: string): any {
+    // Azure Cohere embed-v4 requires input to be an array, not a string.
+    const normalizedInput = Array.isArray(input) ? input : [input];
     const payload: any = {
       model: this.model,
-      input,
+      input: normalizedInput,
       // Force float output to avoid SDK default base64 decoding path.
       encoding_format: "float",
     };
